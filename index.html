@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"> <!-- ★スマホ最適化の最重要 -->
+<title>年間所定労働時間計算アプリ（スマホ最適化版）</title>
+
+<style>
+  body {
+    font-family: "Segoe UI", sans-serif;
+    margin: 10px;
+    background: #f5f7fa;
+  }
+
+  h2 {
+    font-size: 22px;
+    text-align: center;
+  }
+
+  label {
+    font-size: 18px;
+    display: block;
+    margin-bottom: 10px;
+  }
+
+  input {
+    width: 100%;
+    max-width: 200px;
+    padding: 12px;
+    font-size: 18px;
+    border: 2px solid #ddd;
+    border-radius: 12px;
+    background: #fafafa;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+  }
+
+  button {
+    width: 100%;
+    padding: 14px;
+    font-size: 20px;
+    border: none;
+    border-radius: 12px;
+    background: #4a90e2;
+    color: #fff;
+    cursor: pointer;
+    margin-top: 20px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+  }
+
+  button:hover {
+    background: #357ABD;
+  }
+
+  /* テーブルをスマホで崩れないように横スクロール化 */
+  .table-wrapper {
+    overflow-x: auto;
+    margin-top: 20px;
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 400px; /* スマホで崩れない */
+    background: #fff;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  }
+
+  th, td {
+    border: 1px solid #eee;
+    padding: 10px;
+    text-align: center;
+    font-size: 16px;
+  }
+
+  th {
+    background: #f0f3f7;
+  }
+
+  h3 {
+    font-size: 18px;
+    margin-top: 15px;
+  }
+</style>
+</head>
+
+<body>
+
+<h2>年間所定労働時間計算アプリ（スマホ最適化版）</h2>
+
+<label>
+  年度（例：2026 → 2026年4月〜2027年3月）:
+  <input type="number" id="year">
+</label>
+
+<span id="fiscalRange" style="font-weight:bold;"></span><br>
+<span id="holidayCount" style="font-weight:bold; color:#d00;"></span>
+
+<h3>曜日ごとの勤務時間</h3>
+
+<div class="table-wrapper">
+<table>
+  <tr><th>曜日</th><th>勤務時間</th></tr>
+  <tr><td>月</td><td><input id="w1" value="8"></td></tr>
+  <tr><td>火</td><td><input id="w2" value="8"></td></tr>
+  <tr><td>水</td><td><input id="w3" value="8"></td></tr>
+  <tr><td>木</td><td><input id="w4" value="8"></td></tr>
+  <tr><td>金</td><td><input id="w5" value="8"></td></tr>
+  <tr><td>土</td><td><input id="w6" value="0"></td></tr>
+  <tr><td>日</td><td><input id="w0" value="0"></td></tr>
+</table>
+</div>
+
+<button onclick="calculate()">計算する</button>
+
+<h3>月別所定労働時間・営業日数</h3>
+
+<div class="table-wrapper">
+<table id="resultTable">
+  <tr><th>月</th><th>所定労働時間</th><th>営業日数</th></tr>
+</table>
+</div>
+
+<h3 id="yearTotal"></h3>
+<h3 id="monthAverage"></h3>
+<h3 id="fiscalBusinessDays"></h3>
+
+<script>
+
+// ゼロ埋め
+const pad = n => n.toString().padStart(2,"0");
+
+// 春分・秋分
+const getVernalEquinox  = y => Math.floor(20.8431 + 0.242194*(y-1980) - Math.floor((y-1980)/4));
+const getAutumnEquinox  = y => Math.floor(23.2488 + 0.242194*(y-1980) - Math.floor((y-1980)/4));
+
+// ハッピーマンデー
+function getNthMonday(y,m,n){
+  let count=0;
+  for(let d=1;d<=31;d++){
+    if(new Date(y,m-1,d).getDay()===1){
+      count++;
+      if(count===n) return `${y}-${pad(m)}-${pad(d)}`;
+    }
+  }
+}
+
+// 祝日生成
+function generateJapaneseHolidays(y){
+  return [
+    `${y}-01-01`, `${y}-02-11`, `${y}-02-23`,
+    `${y}-04-29`, `${y}-05-03`, `${y}-05-04`, `${y}-05-05`,
+    `${y}-08-11`, `${y}-11-03`, `${y}-11-23`,
+    getNthMonday(y,1,2), getNthMonday(y,7,3),
+    getNthMonday(y,9,3), getNthMonday(y,10,2),
+    `${y}-03-${pad(getVernalEquinox(y))}`,
+    `${y}-09-${pad(getAutumnEquinox(y))}`
+  ];
+}
+
+// 振替休日
+function addSubstituteHolidays(h){
+  const set=new Set(h);
+  for(const date of h){
+    const d=new Date(date);
+    if(d.getDay()===0){
+      let next=new Date(d);
+      do { next.setDate(next.getDate()+1); }
+      while(set.has(next.toISOString().split("T")[0]));
+      set.add(next.toISOString().split("T")[0]);
+    }
+  }
+  return Array.from(set);
+}
+
+// 年度祝日
+function getFiscalYearHolidays(y){
+  const h1=addSubstituteHolidays(generateJapaneseHolidays(y));
+  const h2=addSubstituteHolidays(generateJapaneseHolidays(y+1));
+  return [
+    ...h1.filter(d => { const m=new Date(d).getMonth()+1; return m>=4 && m<=12; }),
+    ...h2.filter(d => { const m=new Date(d).getMonth()+1; return m>=1 && m<=3; })
+  ];
+}
+
+// 営業日数
+function calcBusinessDays(y,m,wh,h){
+  let c=0;
+  const last=new Date(y,m,0).getDate();
+  for(let d=1;d<=last;d++){
+    const dt=new Date(y,m-1,d);
+    const wd=dt.getDay();
+    const ymd=`${y}-${pad(m)}-${pad(d)}`;
+    if(h.includes(ymd)) continue;
+    if(wh[wd]===0) continue;
+    c++;
+  }
+  return c;
+}
+
+// 月の所定労働時間
+function calcMonthlyHours(y,m,wh,h){
+  let t=0;
+  const last=new Date(y,m,0).getDate();
+  for(let d=1;d<=last;d++){
+    const dt=new Date(y,m-1,d);
+    const wd=dt.getDay();
+    const ymd=dt.toISOString().split("T")[0];
+    if(h.includes(ymd)) continue;
+    t+=wh[wd];
+  }
+  return t;
+}
+
+// 年度範囲表示
+function updateFiscalRange(){
+  const y=Number(document.getElementById("year").value);
+  document.getElementById("fiscalRange").innerText=`${y}年4月〜${y+1}年3月`;
+}
+
+// 初期設定
+window.onload=function(){
+  const now=new Date();
+  document.getElementById("year").value=now.getFullYear();
+  updateFiscalRange();
+};
+
+document.getElementById("year").addEventListener("input",updateFiscalRange);
+
+// 計算
+function calculate(){
+  const year=Number(document.getElementById("year").value);
+
+  const workHours={
+    0:Number(document.getElementById("w0").value),
+    1:Number(document.getElementById("w1").value),
+    2:Number(document.getElementById("w2").value),
+    3:Number(document.getElementById("w3").value),
+    4:Number(document.getElementById("w4").value),
+    5:Number(document.getElementById("w5").value),
+    6:Number(document.getElementById("w6").value)
+  };
+
+  const holidays=getFiscalYearHolidays(year);
+  document.getElementById("holidayCount").innerText=`祝日数：${holidays.length}日`;
+
+  const table=document.getElementById("resultTable");
+  table.innerHTML="<tr><th>月</th><th>所定労働時間</th><th>営業日数</th></tr>";
+
+  let yearlyTotal=0, fiscalBusinessDays=0;
+
+  for(let m=4;m<=12;m++){
+    const mh=calcMonthlyHours(year,m,workHours,holidays);
+    const bd=calcBusinessDays(year,m,workHours,holidays);
+    yearlyTotal+=mh; fiscalBusinessDays+=bd;
+    table.innerHTML+=`<tr><td>${m}</td><td>${mh}</td><td>${bd}</td></tr>`;
+  }
+
+  for(let m=1;m<=3;m++){
+    const mh=calcMonthlyHours(year+1,m,workHours,holidays);
+    const bd=calcBusinessDays(year+1,m,workHours,holidays);
+    yearlyTotal+=mh; fiscalBusinessDays+=bd;
+    table.innerHTML+=`<tr><td>${m}</td><td>${mh}</td><td>${bd}</td></tr>`;
+  }
+
+  const avg=Math.round(yearlyTotal/12);
+
+  document.getElementById("yearTotal").innerText=`年度所定労働時間：${yearlyTotal} 時間`;
+  document.getElementById("monthAverage").innerText=`月平均所定労働時間：${avg} 時間`;
+  document.getElementById("fiscalBusinessDays").innerText=`年度総営業日数：${fiscalBusinessDays} 日`;
+}
+
+</script>
+
+</body>
+</html>
